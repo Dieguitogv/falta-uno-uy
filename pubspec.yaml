@@ -1,7 +1,7 @@
 name: falta_uno_uy
 description: MVP de Falta Uno UY
 publish_to: 'none'
-version: 0.2.0+2
+version: 0.3.0+3
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
@@ -12,6 +12,7 @@ dependencies:
   cupertino_icons: ^1.0.8
   supabase_flutter: ^2.17.2
   intl: ^0.20.2
+  shared_preferences: ^2.5.3
 
 
 dev_dependencies:

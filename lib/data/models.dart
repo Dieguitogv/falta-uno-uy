@@ -28,6 +28,20 @@ class MatchModel {
     this.joined = false,
   });
 
+
+  Map<String, dynamic> toMap() => {
+        'id': id,
+        'organizer_id': organizerId,
+        'zone': zone,
+        'venue': venue,
+        'starts_at': startsAt.toUtc().toIso8601String(),
+        'price_per_player': price,
+        'level': level,
+        'max_players': maxPlayers,
+        'player_count': playerCount,
+        'joined': joined,
+      };
+
   MatchModel copyWith({int? playerCount, bool? joined}) => MatchModel(
         id: id,
         organizerId: organizerId,
@@ -41,7 +55,7 @@ class MatchModel {
         joined: joined ?? this.joined,
       );
 
-  factory MatchModel.fromMap(Map<String, dynamic> map, {bool joined = false}) {
+  factory MatchModel.fromMap(Map<String, dynamic> map, {bool? joined}) {
     return MatchModel(
       id: map['id'].toString(),
       organizerId: map['organizer_id'].toString(),
@@ -52,7 +66,7 @@ class MatchModel {
       level: (map['level'] ?? 'Cualquiera').toString(),
       maxPlayers: (map['max_players'] as num?)?.toInt() ?? 10,
       playerCount: (map['player_count'] as num?)?.toInt() ?? 1,
-      joined: joined,
+      joined: joined ?? (map['joined'] == true),
     );
   }
 }

@@ -29,6 +29,7 @@ create table if not exists public.match_players (
   match_id uuid not null references public.matches(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
   status text not null default 'confirmed' check (status in ('confirmed','waitlist','left','no_show')),
+  role text not null default 'starter' check (role in ('starter','reserve')),
   joined_at timestamptz not null default now(),
   primary key(match_id, user_id)
 );
@@ -104,3 +105,4 @@ grant select on public.matches_with_counts to authenticated;
 -- V3: max_players representa titulares. La app permite 1 suplente adicional.
 -- En una migración posterior se agregará role ('starter'/'reserve') a match_players
 -- para hacer atómica la promoción automática del suplente cuando se libera un titular.
+\n\n-- V5: al bajarse un titular, el suplente se promueve automáticamente.\ncreate or replace function public.leave_match_and_promote_reserve(p_match_id uuid)\nreturns void\nlanguage plpgsql\nsecurity definer\nset search_path = public\nas $$\ndeclare\n  leaving_role text;\n  reserve_user uuid;\nbegin\n  select role into leaving_role\n  from public.match_players\n  where match_id = p_match_id and user_id = auth.uid() and status = 'confirmed';\n\n  delete from public.match_players\n  where match_id = p_match_id and user_id = auth.uid();\n\n  if leaving_role = 'starter' then\n    select user_id into reserve_user\n    from public.match_players\n    where match_id = p_match_id and status = 'confirmed' and role = 'reserve'\n    order by joined_at\n    limit 1;\n\n    if reserve_user is not null then\n      update public.match_players\n      set role = 'starter'\n      where match_id = p_match_id and user_id = reserve_user;\n    end if;\n  end if;\nend;\n$$;\n\ngrant execute on function public.leave_match_and_promote_reserve(uuid) to authenticated;\n

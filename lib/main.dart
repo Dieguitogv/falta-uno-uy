@@ -256,7 +256,7 @@ class _HomeScreenState extends State<HomeScreen> {
           const SizedBox(width: 8),
           Expanded(child: _QuickAction(icon: Icons.add, text: 'Crear\npartido', highlighted: true, onTap: widget.onCreate)),
         ]),
-        if (!AppConfig.hasSupabase) ...[const SizedBox(height: 14), const DemoBanner()],
+        if (!AppConfig.hasSupabase) ...[const SizedBox(height: 14), const LocalModeBanner()],
         const SizedBox(height: 24),
         const SectionTitle(title: 'Tus próximos partidos'),
         const SizedBox(height: 12),
@@ -350,17 +350,16 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
   final zone = TextEditingController();
   final venue = TextEditingController();
   final price = TextEditingController(text: '350');
-  final players = TextEditingController(text: '10');
   DateTime date = DateTime.now().add(const Duration(days: 1));
   TimeOfDay time = const TimeOfDay(hour: 21, minute: 0);
   String level = 'Intermedio';
   bool loading = false;
 
   Future<void> create() async {
-    final maxPlayers = int.tryParse(players.text) ?? 0;
+    const maxPlayers = 10;
     final priceValue = int.tryParse(price.text) ?? 0;
-    if (zone.text.trim().isEmpty || venue.text.trim().isEmpty || maxPlayers < 2) {
-      showMessage(context, 'Completá zona, cancha y cantidad de jugadores.');
+    if (zone.text.trim().isEmpty || venue.text.trim().isEmpty) {
+      showMessage(context, 'Completá zona y cancha.');
       return;
     }
     final startsAt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
@@ -410,7 +409,15 @@ class _CreateMatchScreenState extends State<CreateMatchScreen> {
         const SizedBox(height: 12),
         DropdownButtonFormField<String>(value: level, decoration: const InputDecoration(labelText: 'Nivel', prefixIcon: Icon(Icons.equalizer)), items: ['Recreativo', 'Intermedio', 'Competitivo', 'Cualquiera'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(), onChanged: (v) => setState(() => level = v ?? level)),
         const SizedBox(height: 12),
-        TextField(controller: players, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Cantidad total de jugadores', prefixIcon: Icon(Icons.groups_outlined))),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: const Color(0xFF111E22), borderRadius: BorderRadius.circular(16)),
+          child: const Row(children: [
+            Icon(Icons.groups_outlined, color: Color(0xFF4ED66B)),
+            SizedBox(width: 10),
+            Expanded(child: Text('Fútbol 5: 10 titulares + 1 suplente de seguridad. El partido queda cubierto con 11 personas.')),
+          ]),
+        ),
         const SizedBox(height: 18),
         FilledButton(onPressed: loading ? null : create, child: Padding(padding: const EdgeInsets.symmetric(vertical: 14), child: Text(loading ? 'PUBLICANDO...' : 'PUBLICAR PARTIDO'))),
       ],
@@ -680,10 +687,18 @@ class MatchCard extends StatelessWidget {
   }
 }
 
-class DemoBanner extends StatelessWidget {
-  const DemoBanner({super.key});
+class LocalModeBanner extends StatelessWidget {
+  const LocalModeBanner({super.key});
   @override
-  Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondaryContainer, borderRadius: BorderRadius.circular(14)), child: const Row(children: [Icon(Icons.info_outline), SizedBox(width: 10), Expanded(child: Text('Modo demo activo. Los cambios se guardan solo mientras la app está abierta.'))]));
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondaryContainer, borderRadius: BorderRadius.circular(14)),
+    child: const Row(children: [
+      Icon(Icons.phone_android_outlined),
+      SizedBox(width: 10),
+      Expanded(child: Text('Modo local persistente. Los partidos quedan guardados en este celular. Al conectar Supabase se sincronizarán entre usuarios.')),
+    ]),
+  );
 }
 
 class EmptyCard extends StatelessWidget {
