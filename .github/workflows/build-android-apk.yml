@@ -1,0 +1,99 @@
+name: Crear APK de Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+      - principal
+
+jobs:
+  build:
+    name: Compilar APK
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Verificar Flutter
+        run: flutter --version
+
+      - name: Crear/actualizar estructura Android
+        run: flutter create . --platforms=android --org uy.faltauno --project-name falta_uno_uy
+
+      - name: Asegurar permiso de Internet en APK release
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          text = p.read_text(encoding='utf-8')
+          permission = '<uses-permission android:name="android.permission.INTERNET" />'
+          if permission not in text:
+              text = text.replace('<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\\n    ' + permission,
+                                  1)
+              p.write_text(text, encoding='utf-8')
+          print(p.read_text(encoding='utf-8'))
+          PY
+
+      - name: Instalar dependencias
+        run: flutter pub get
+
+      - name: Verificar configuración de Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ]; then
+            echo "ERROR: falta el Repository Secret SUPABASE_URL"
+            exit 1
+          fi
+          if [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "ERROR: falta el Repository Secret SUPABASE_PUBLISHABLE_KEY"
+            exit 1
+          fi
+          case "$SUPABASE_URL" in
+            https://*.supabase.co|https://*.supabase.co/) ;;
+            *) echo "ERROR: SUPABASE_URL no parece una URL válida de Supabase"; exit 1 ;;
+          esac
+          echo "Configuración de Supabase detectada correctamente."
+
+      - name: Analizar proyecto
+        run: flutter analyze || true
+
+      - name: Crear APK release
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          flutter build apk --release \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY"
+
+      - name: Verificar APK
+        run: test -f build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: falta-uno-uy-conexion-fix-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
