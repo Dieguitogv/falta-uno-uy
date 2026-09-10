@@ -98,10 +98,14 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final auth = Supabase.instance.client.auth;
       if (createAccount) {
+        final displayName = name.text.trim().isEmpty ? 'Jugador' : name.text.trim();
         await auth.signUp(
           email: email.text.trim(),
           password: password.text,
-          data: {'display_name': name.text.trim().isEmpty ? 'Jugador' : name.text.trim()},
+          data: {
+            'name': displayName,
+            'display_name': displayName,
+          },
         );
         if (mounted && auth.currentSession == null) {
           showMessage(context, 'Cuenta creada. Revisá tu email para confirmar el registro.');
@@ -621,38 +625,316 @@ class MatchList extends StatelessWidget {
       : ListView(padding: const EdgeInsets.all(18), children: matches.map((m) => Padding(padding: const EdgeInsets.only(bottom: 12), child: MatchCard(match: m, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => MatchDetailScreen(initialMatch: m)))))).toList());
 }
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
+
+  @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  bool loading = true;
+  bool saving = false;
+  String? error;
+
+  String name = 'Jugador';
+  String position = 'Sin posición';
+  String neighborhood = 'Sin zona';
+  double rating = 5.0;
+  int matchesPlayed = 0;
+  int attendancePct = 100;
+  String? avatarUrl;
+
+  User? get user => AppConfig.hasSupabase ? Supabase.instance.client.auth.currentUser : null;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfile();
+  }
+
+  Future<void> _loadProfile() async {
+    if (!AppConfig.hasSupabase || user == null) {
+      if (mounted) {
+        setState(() {
+          loading = false;
+          error = 'No hay una sesión activa.';
+        });
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() {
+        loading = true;
+        error = null;
+      });
+    }
+
+    try {
+      final client = Supabase.instance.client;
+      final uid = user!.id;
+
+      var row = await client
+          .from('profiles')
+          .select(
+            'id, name, preferred_position, neighborhood, avatar_url, rating, matches_played, attendance_pct',
+          )
+          .eq('id', uid)
+          .maybeSingle();
+
+      if (row == null) {
+        final metadataName = (
+          user!.userMetadata?['name'] ??
+          user!.userMetadata?['display_name'] ??
+          user!.email?.split('@').first ??
+          'Jugador'
+        ).toString();
+
+        await client.from('profiles').insert({
+          'id': uid,
+          'name': metadataName,
+        });
+
+        row = await client
+            .from('profiles')
+            .select(
+              'id, name, preferred_position, neighborhood, avatar_url, rating, matches_played, attendance_pct',
+            )
+            .eq('id', uid)
+            .maybeSingle();
+      }
+
+      if (!mounted) return;
+
+      final profile = row ?? <String, dynamic>{};
+      final rawRating = profile['rating'];
+
+      setState(() {
+        name = (profile['name']?.toString().trim().isNotEmpty ?? false)
+            ? profile['name'].toString()
+            : (user!.userMetadata?['display_name'] ?? 'Jugador').toString();
+        position = (profile['preferred_position']?.toString().trim().isNotEmpty ?? false)
+            ? profile['preferred_position'].toString()
+            : 'Sin posición';
+        neighborhood = (profile['neighborhood']?.toString().trim().isNotEmpty ?? false)
+            ? profile['neighborhood'].toString()
+            : 'Sin zona';
+        rating = rawRating is num ? rawRating.toDouble() : double.tryParse(rawRating?.toString() ?? '') ?? 5.0;
+        matchesPlayed = profile['matches_played'] is num
+            ? (profile['matches_played'] as num).toInt()
+            : int.tryParse(profile['matches_played']?.toString() ?? '') ?? 0;
+        attendancePct = profile['attendance_pct'] is num
+            ? (profile['attendance_pct'] as num).toInt()
+            : int.tryParse(profile['attendance_pct']?.toString() ?? '') ?? 100;
+        avatarUrl = profile['avatar_url']?.toString();
+        loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        loading = false;
+        error = 'No se pudo cargar tu perfil.';
+      });
+    }
+  }
+
+  Future<void> _editProfile() async {
+    final nameController = TextEditingController(text: name == 'Jugador' ? '' : name);
+    final positionController = TextEditingController(text: position == 'Sin posición' ? '' : position);
+    final zoneController = TextEditingController(text: neighborhood == 'Sin zona' ? '' : neighborhood);
+
+    final shouldSave = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Editar perfil'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Nombre',
+                  prefixIcon: Icon(Icons.person_outline),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: positionController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Posición',
+                  hintText: 'Ej: Delantero / Volante',
+                  prefixIcon: Icon(Icons.sports_soccer_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: zoneController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Zona',
+                  hintText: 'Ej: Montevideo',
+                  prefixIcon: Icon(Icons.location_on_outlined),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('CANCELAR'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('GUARDAR'),
+          ),
+        ],
+      ),
+    );
+
+    if (shouldSave != true || !mounted) return;
+
+    final newName = nameController.text.trim();
+    final newPosition = positionController.text.trim();
+    final newZone = zoneController.text.trim();
+
+    if (newName.isEmpty) {
+      showMessage(context, 'Ingresá tu nombre.');
+      return;
+    }
+
+    setState(() => saving = true);
+
+    try {
+      final client = Supabase.instance.client;
+      await client.from('profiles').update({
+        'name': newName,
+        'preferred_position': newPosition.isEmpty ? null : newPosition,
+        'neighborhood': newZone.isEmpty ? null : newZone,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', user!.id);
+
+      await client.auth.updateUser(
+        UserAttributes(
+          data: {
+            'name': newName,
+            'display_name': newName,
+          },
+        ),
+      );
+
+      if (!mounted) return;
+      showMessage(context, 'Perfil actualizado ✅');
+      await _loadProfile();
+    } on PostgrestException catch (e) {
+      if (mounted) showMessage(context, 'No se pudo guardar el perfil: ${e.message}');
+    } on AuthException catch (e) {
+      if (mounted) showMessage(context, 'Perfil guardado, pero faltó actualizar el nombre de acceso: ${e.message}');
+      await _loadProfile();
+    } catch (_) {
+      if (mounted) showMessage(context, 'No se pudo guardar el perfil.');
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final user = AppConfig.hasSupabase ? Supabase.instance.client.auth.currentUser : null;
-    final name = (user?.userMetadata?['display_name'] ?? 'Diego Velazco').toString();
-    return ListView(
-      padding: const EdgeInsets.all(18),
-      children: [
-        Row(children: [
-          const CircleAvatar(radius: 38, child: Icon(Icons.person, size: 38)),
-          const SizedBox(width: 14),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(name, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)), const Text('Delantero / Volante · Montevideo')])),
-        ]),
-        const SizedBox(height: 20),
-        const Row(mainAxisAlignment: MainAxisAlignment.spaceAround, children: [Stat(value: '5.0', label: 'Reputación'), Stat(value: '0', label: 'Partidos'), Stat(value: '100%', label: 'Asistencia')]),
-        const SizedBox(height: 26),
-        const SectionTitle(title: 'Mis cuadros'),
-        const SizedBox(height: 12),
-        const TeamTile(name: 'Los Pibes FC', years: '2025 · Actualidad', matches: '18 partidos'),
-        const TeamTile(name: 'La Banda FC', years: '2024 · 2025', matches: '11 partidos'),
-        const SizedBox(height: 24),
-        const SectionTitle(title: 'Historial reciente'),
-        const ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.check_circle_outline), title: Text('Los Pibes FC vs La Banda'), subtitle: Text('28 AGO · Participó')),
-        const ListTile(contentPadding: EdgeInsets.zero, leading: Icon(Icons.check_circle_outline), title: Text('Partido abierto · Malvín'), subtitle: Text('21 AGO · Participó')),
-        const SizedBox(height: 16),
-        OutlinedButton.icon(onPressed: () => showMessage(context, 'Edición de perfil: próxima etapa.'), icon: const Icon(Icons.edit_outlined), label: const Text('EDITAR PERFIL')),
-        if (AppConfig.hasSupabase) ...[
-          const SizedBox(height: 8),
-          TextButton.icon(onPressed: () => Supabase.instance.client.auth.signOut(), icon: const Icon(Icons.logout), label: const Text('Cerrar sesión')),
+    if (loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (error != null) {
+      return Padding(
+        padding: const EdgeInsets.all(18),
+        child: ErrorCard(text: error!, onRetry: _loadProfile),
+      );
+    }
+
+    final subtitle = [
+      if (position != 'Sin posición') position,
+      if (neighborhood != 'Sin zona') neighborhood,
+    ].join(' · ');
+
+    return RefreshIndicator(
+      onRefresh: _loadProfile,
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(18),
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 38,
+                backgroundImage: (avatarUrl != null && avatarUrl!.trim().isNotEmpty)
+                    ? NetworkImage(avatarUrl!)
+                    : null,
+                child: (avatarUrl == null || avatarUrl!.trim().isEmpty)
+                    ? const Icon(Icons.person, size: 38)
+                    : null,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      name,
+                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle.isEmpty ? 'Completá tu posición y zona' : subtitle,
+                      style: const TextStyle(color: Color(0xFFC1CCCE)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              Stat(value: rating.toStringAsFixed(1), label: 'Reputación'),
+              Stat(value: '$matchesPlayed', label: 'Partidos'),
+              Stat(value: '$attendancePct%', label: 'Asistencia'),
+            ],
+          ),
+          const SizedBox(height: 26),
+          const SectionTitle(title: 'Mis cuadros'),
+          const SizedBox(height: 12),
+          const EmptyCard(text: 'Todavía no pertenecés a ningún cuadro.'),
+          const SizedBox(height: 24),
+          const SectionTitle(title: 'Historial reciente'),
+          const SizedBox(height: 12),
+          const EmptyCard(text: 'Tu historial aparecerá cuando participes en partidos.'),
+          const SizedBox(height: 18),
+          OutlinedButton.icon(
+            onPressed: saving ? null : _editProfile,
+            icon: saving
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.edit_outlined),
+            label: Text(saving ? 'GUARDANDO...' : 'EDITAR PERFIL'),
+          ),
+          if (AppConfig.hasSupabase) ...[
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: () => Supabase.instance.client.auth.signOut(),
+              icon: const Icon(Icons.logout),
+              label: const Text('Cerrar sesión'),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
