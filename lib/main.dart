@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/app_config.dart';
@@ -86,6 +88,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final email = TextEditingController();
   final password = TextEditingController();
   final name = TextEditingController();
+  DateTime? birthDate;
   bool createAccount = false;
   bool loading = false;
 
@@ -98,15 +101,42 @@ class _LoginScreenState extends State<LoginScreen> {
     try {
       final auth = Supabase.instance.client.auth;
       if (createAccount) {
-        final displayName = name.text.trim().isEmpty ? 'Jugador' : name.text.trim();
-        await auth.signUp(
+        final displayName = name.text.trim();
+        if (displayName.isEmpty) {
+          showMessage(context, 'Ingresá tu nombre.');
+          return;
+        }
+        if (birthDate == null) {
+          showMessage(context, 'Ingresá tu fecha de nacimiento.');
+          return;
+        }
+        final today = DateTime.now();
+        var age = today.year - birthDate!.year;
+        if (today.month < birthDate!.month ||
+            (today.month == birthDate!.month && today.day < birthDate!.day)) {
+          age--;
+        }
+        if (age < 16) {
+          showMessage(context, 'Para registrarte debés tener 16 años o más.');
+          return;
+        }
+        final response = await auth.signUp(
           email: email.text.trim(),
           password: password.text,
           data: {
             'name': displayName,
             'display_name': displayName,
+            'birth_date': DateFormat('yyyy-MM-dd').format(birthDate!),
           },
         );
+        if (response.user != null && auth.currentSession != null) {
+          await Supabase.instance.client.from('profiles').upsert({
+            'id': response.user!.id,
+            'name': displayName,
+            'birth_date': DateFormat('yyyy-MM-dd').format(birthDate!),
+            'updated_at': DateTime.now().toIso8601String(),
+          });
+        }
         if (mounted && auth.currentSession == null) {
           showMessage(context, 'Cuenta creada. Revisá tu email para confirmar el registro.');
         }
@@ -141,6 +171,29 @@ class _LoginScreenState extends State<LoginScreen> {
                   const SizedBox(height: 30),
                   if (createAccount) ...[
                     TextField(controller: name, decoration: const InputDecoration(labelText: 'Nombre')),
+                    const SizedBox(height: 12),
+                    InkWell(
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          initialDate: DateTime(DateTime.now().year - 18),
+                          firstDate: DateTime(1920),
+                          lastDate: DateTime.now(),
+                        );
+                        if (picked != null && mounted) setState(() => birthDate = picked);
+                      },
+                      child: InputDecorator(
+                        decoration: const InputDecoration(
+                          labelText: 'Fecha de nacimiento',
+                          prefixIcon: Icon(Icons.cake_outlined),
+                        ),
+                        child: Text(
+                          birthDate == null
+                              ? 'Seleccionar fecha'
+                              : DateFormat('dd/MM/yyyy').format(birthDate!),
+                        ),
+                      ),
+                    ),
                     const SizedBox(height: 12),
                   ],
                   TextField(controller: email, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email')),
@@ -639,7 +692,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   String name = 'Jugador';
   String position = 'Sin posición';
+  String secondaryPosition = '';
   String neighborhood = 'Sin zona';
+  DateTime? birthDate;
   double rating = 5.0;
   int matchesPlayed = 0;
   int attendancePct = 100;
@@ -678,7 +733,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       var row = await client
           .from('profiles')
           .select(
-            'id, name, preferred_position, neighborhood, avatar_url, rating, matches_played, attendance_pct',
+            'id, name, preferred_position, secondary_position, neighborhood, birth_date, avatar_url, rating, matches_played, attendance_pct',
           )
           .eq('id', uid)
           .maybeSingle();
@@ -699,7 +754,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         row = await client
             .from('profiles')
             .select(
-              'id, name, preferred_position, neighborhood, avatar_url, rating, matches_played, attendance_pct',
+              'id, name, preferred_position, secondary_position, neighborhood, birth_date, avatar_url, rating, matches_played, attendance_pct',
             )
             .eq('id', uid)
             .maybeSingle();
@@ -717,9 +772,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
         position = (profile['preferred_position']?.toString().trim().isNotEmpty ?? false)
             ? profile['preferred_position'].toString()
             : 'Sin posición';
+        secondaryPosition = profile['secondary_position']?.toString() ?? '';
         neighborhood = (profile['neighborhood']?.toString().trim().isNotEmpty ?? false)
             ? profile['neighborhood'].toString()
             : 'Sin zona';
+        birthDate = DateTime.tryParse(profile['birth_date']?.toString() ?? '');
         rating = rawRating is num ? rawRating.toDouble() : double.tryParse(rawRating?.toString() ?? '') ?? 5.0;
         matchesPlayed = profile['matches_played'] is num
             ? (profile['matches_played'] as num).toInt()
@@ -742,6 +799,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _editProfile() async {
     final nameController = TextEditingController(text: name == 'Jugador' ? '' : name);
     final positionController = TextEditingController(text: position == 'Sin posición' ? '' : position);
+    final secondaryPositionController = TextEditingController(text: secondaryPosition);
     final zoneController = TextEditingController(text: neighborhood == 'Sin zona' ? '' : neighborhood);
 
     final shouldSave = await showDialog<bool>(
@@ -768,6 +826,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   labelText: 'Posición',
                   hintText: 'Ej: Delantero / Volante',
                   prefixIcon: Icon(Icons.sports_soccer_outlined),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: secondaryPositionController,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Posición secundaria',
+                  hintText: 'Ej: Volante',
+                  prefixIcon: Icon(Icons.swap_horiz),
                 ),
               ),
               const SizedBox(height: 12),
@@ -800,6 +868,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final newName = nameController.text.trim();
     final newPosition = positionController.text.trim();
+    final newSecondaryPosition = secondaryPositionController.text.trim();
     final newZone = zoneController.text.trim();
 
     if (newName.isEmpty) {
@@ -814,6 +883,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       await client.from('profiles').update({
         'name': newName,
         'preferred_position': newPosition.isEmpty ? null : newPosition,
+        'secondary_position': newSecondaryPosition.isEmpty ? null : newSecondaryPosition,
         'neighborhood': newZone.isEmpty ? null : newZone,
         'updated_at': DateTime.now().toIso8601String(),
       }).eq('id', user!.id);
@@ -842,6 +912,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  Future<void> _changePhoto() async {
+    if (user == null || saving) return;
+    final image = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 82,
+      maxWidth: 1200,
+    );
+    if (image == null || !mounted) return;
+
+    setState(() => saving = true);
+    try {
+      final client = Supabase.instance.client;
+      final extension = image.path.toLowerCase().endsWith('.png') ? 'png' : 'jpg';
+      final storagePath = '${user!.id}/profile_${DateTime.now().millisecondsSinceEpoch}.$extension';
+      await client.storage.from('avatars').upload(
+        storagePath,
+        File(image.path),
+        fileOptions: const FileOptions(upsert: true),
+      );
+      final publicUrl = client.storage.from('avatars').getPublicUrl(storagePath);
+      await client.from('profiles').update({
+        'avatar_url': publicUrl,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', user!.id);
+      if (!mounted) return;
+      showMessage(context, 'Foto de perfil actualizada ✅');
+      await _loadProfile();
+    } on StorageException catch (e) {
+      if (mounted) showMessage(context, 'No se pudo subir la foto: ${e.message}');
+    } catch (_) {
+      if (mounted) showMessage(context, 'No se pudo actualizar la foto.');
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (loading) {
@@ -857,6 +963,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     final subtitle = [
       if (position != 'Sin posición') position,
+      if (secondaryPosition.trim().isNotEmpty) secondaryPosition,
       if (neighborhood != 'Sin zona') neighborhood,
     ].join(' · ');
 
@@ -868,14 +975,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
         children: [
           Row(
             children: [
-              CircleAvatar(
-                radius: 38,
-                backgroundImage: (avatarUrl != null && avatarUrl!.trim().isNotEmpty)
-                    ? NetworkImage(avatarUrl!)
-                    : null,
-                child: (avatarUrl == null || avatarUrl!.trim().isEmpty)
-                    ? const Icon(Icons.person, size: 38)
-                    : null,
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  CircleAvatar(
+                    radius: 38,
+                    backgroundImage: (avatarUrl != null && avatarUrl!.trim().isNotEmpty)
+                        ? NetworkImage(avatarUrl!)
+                        : null,
+                    child: (avatarUrl == null || avatarUrl!.trim().isEmpty)
+                        ? const Icon(Icons.person, size: 38)
+                        : null,
+                  ),
+                  Positioned(
+                    right: -5,
+                    bottom: -5,
+                    child: IconButton.filled(
+                      tooltip: 'Cambiar foto',
+                      onPressed: saving ? null : _changePhoto,
+                      icon: const Icon(Icons.camera_alt, size: 18),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(width: 14),
               Expanded(
