@@ -1,0 +1,103 @@
+name: Crear APK de Android
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - principal
+
+jobs:
+  build:
+    name: Compilar APK
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Configurar Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Verificar Flutter
+        run: flutter --version
+
+      - name: Crear estructura Android si falta
+        run: |
+          if [ ! -d "android" ]; then
+            flutter create . --platforms=android
+          fi
+
+      - name: Habilitar Internet en el APK release
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          permission = '<uses-permission android:name="android.permission.INTERNET" />'
+          content = manifest.read_text(encoding="utf-8")
+
+          if permission not in content:
+              end_of_manifest_tag = content.find(">")
+              if end_of_manifest_tag == -1:
+                  raise SystemExit("ERROR: AndroidManifest.xml no es válido")
+              content = (
+                  content[:end_of_manifest_tag + 1]
+                  + "\n    "
+                  + permission
+                  + content[end_of_manifest_tag + 1:]
+              )
+              manifest.write_text(content, encoding="utf-8")
+
+          print("Permiso de Internet confirmado en AndroidManifest.xml")
+          PY
+
+          grep -n "android.permission.INTERNET" android/app/src/main/AndroidManifest.xml
+
+      - name: Instalar dependencias
+        run: flutter pub get
+
+      - name: Verificar secretos de Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ]; then
+            echo "ERROR: falta el secret SUPABASE_URL"
+            exit 1
+          fi
+
+          if [ -z "$SUPABASE_PUBLISHABLE_KEY" ]; then
+            echo "ERROR: falta el secret SUPABASE_PUBLISHABLE_KEY"
+            exit 1
+          fi
+
+          echo "Secrets de Supabase detectados correctamente."
+
+      - name: Crear APK release
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          flutter build apk --release \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_PUBLISHABLE_KEY="$SUPABASE_PUBLISHABLE_KEY"
+
+      - name: Subir APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: falta-uno-uy-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+          retention-days: 14
